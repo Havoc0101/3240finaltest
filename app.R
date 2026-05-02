@@ -16,6 +16,8 @@ library(sf)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(htmlwidgets)
+library(shinyjs)
+library(markdown)
 
 # =========================
 # 1. Data path
@@ -798,53 +800,1268 @@ decode_y_pollutant <- function(v) {
 # The main UI container. fluidPage creates a layout that fills the 
 # browser window width.
 # =========================
-ui <- fluidPage(
+
+ui <- fluidPage(  # Create the full Shiny user interface page
   
-  tags$head(
-    # tags$head allows you to place elements in the <head> of the HTML document, 
-    # which is where global styles are typically defined.
-    tags$style(
-      HTML("
-        body {
-          background-color: #f8f9fa;
-          font-family: 'Segoe UI', Tahoma, sans-serif;
-        }
-        .container-fluid {
-          max-width: 1900px;
-        }
-        .well {
-          background-color: #f7f7f7;
-        }
-        .control-group { 
-          margin-bottom: 25px; 
-        }
-        .btn-jump { 
-          margin: 4px; 
-          padding: 5px 10px; 
-          border-radius: 4px; 
-        }
-        .view-all-btn { 
-          margin-bottom: 15px; 
-          font-weight: bold; 
-        }
-        hr { 
-          margin-top: 20px; 
-          margin-bottom: 20px; 
-        }
-      ")
+  useShinyjs(),  # Enable shinyjs so the app can control UI behavior dynamically if needed
+  
+  # =========================
+  # Opening / Welcome Page
+  # =========================
+  # This overlay appears when the app first loads.
+  # It introduces PM2.5 with a typewriter animation.
+  # After the typing animation, it shows the Markdown welcome text and Start button.
+  
+  div(
+    id = "opening_overlay",
+    class = "opening-overlay",
+    
+    div(
+      class = "opening-card",
+      
+      # Opening language buttons
+      div(
+        class = "opening-lang-row",
+        
+        actionButton(
+          inputId = "open_lang_en",
+          label = "English",
+          class = "opening-lang-btn opening-lang-active"
+        ),
+        
+        actionButton(
+          inputId = "open_lang_zh",
+          label = "中文",
+          class = "opening-lang-btn"
+        ),
+        
+        actionButton(
+          inputId = "open_lang_ja",
+          label = "日本語",
+          class = "opening-lang-btn"
+        )
+      ),
+      
+      # -------------------------
+      # Typewriter text area
+      # -------------------------
+      div(
+        id = "opening_typewriter",
+        class = "opening-typewriter",
+        
+        span(id = "typewriter_text"),
+        # JavaScript will type PM2.5 introduction here.
+        
+        span(id = "typewriter_cursor", class = "opening-cursor", "|")
+        # Blinking cursor.
+      ),
+      
+      # -------------------------
+      # Final welcome message
+      # -------------------------
+      div(
+        id = "opening_final",
+        class = "opening-final",
+        
+        uiOutput("opening_markdown"),
+        # Load opening_en.md / opening_zh.md / opening_ja.md.
+        
+        actionButton(
+          inputId = "start_app",
+          label = "Start",
+          class = "start-btn",
+          onclick = "
+          document.getElementById('opening_overlay').classList.add('hide-opening');
+        "
+        )
+        # Clicking Start hides the opening overlay.
+      )
+    ),
+    
+    
+    
+    # -------------------------
+    # Opening animation script
+    # -------------------------
+    tags$script(HTML("
+  window.openingTexts = {
+    en: 'Have you ever heard of PM2.5? PM2.5 refers to tiny airborne particles that can enter the human body and harm our health.',
+    zh: '你是否听说过 PM2.5？PM2.5 是一种非常微小的空气颗粒物，它可以进入人体，并对健康造成危害。',
+    ja: 'PM2.5 を聞いたことがありますか？PM2.5 は非常に小さな大気中の粒子で、人体に入り込み、健康に悪影響を与える可能性があります。'
+  };
+
+  window.openingTypingTimer = null;
+
+  function setOpeningLang(lang) {
+
+    // Send selected language to Shiny server
+    if (window.Shiny) {
+      Shiny.setInputValue('opening_lang_selected', lang, {priority: 'event'});
+    }
+
+    // Button active style
+    document.querySelectorAll('.opening-lang-btn').forEach(function(btn) {
+      btn.classList.remove('opening-lang-active');
+    });
+
+    const activeBtn = document.getElementById('open_lang_' + lang);
+    if (activeBtn) {
+      activeBtn.classList.add('opening-lang-active');
+    }
+
+    const target = document.getElementById('typewriter_text');
+    const cursor = document.getElementById('typewriter_cursor');
+    const typewriterBox = document.getElementById('opening_typewriter');
+    const finalBox = document.getElementById('opening_final');
+
+    if (!target || !typewriterBox || !finalBox) return;
+
+    // Clear old timer
+    if (window.openingTypingTimer) {
+      clearTimeout(window.openingTypingTimer);
+    }
+
+    // Reset display
+    target.textContent = '';
+    typewriterBox.style.display = 'block';
+    typewriterBox.style.opacity = '1';
+    typewriterBox.style.transform = 'translateY(0)';
+    finalBox.classList.remove('show-final');
+
+    if (cursor) {
+      cursor.style.display = 'inline-block';
+    }
+
+    let text = window.openingTexts[lang];
+    let index = 0;
+
+    function typeText() {
+      if (index < text.length) {
+        target.textContent += text.charAt(index);
+        index++;
+        window.openingTypingTimer = setTimeout(typeText, 45);
+      } else {
+        window.openingTypingTimer = setTimeout(function() {
+
+          if (cursor) {
+            cursor.style.display = 'none';
+          }
+
+          typewriterBox.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+          typewriterBox.style.opacity = '0';
+          typewriterBox.style.transform = 'translateY(-12px)';
+
+          window.openingTypingTimer = setTimeout(function() {
+            typewriterBox.style.display = 'none';
+            finalBox.classList.add('show-final');
+          }, 750);
+
+        }, 900);
+      }
+    }
+
+    typeText();
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+
+    const enBtn = document.getElementById('open_lang_en');
+    const zhBtn = document.getElementById('open_lang_zh');
+    const jaBtn = document.getElementById('open_lang_ja');
+
+    if (enBtn) {
+      enBtn.addEventListener('click', function() {
+        setOpeningLang('en');
+      });
+    }
+
+    if (zhBtn) {
+      zhBtn.addEventListener('click', function() {
+        setOpeningLang('zh');
+      });
+    }
+
+    if (jaBtn) {
+      jaBtn.addEventListener('click', function() {
+        setOpeningLang('ja');
+      });
+    }
+
+    setOpeningLang('en');
+  });
+"))
+    
+    
+    
+  ),
+  
+  tags$head(  # Put global CSS settings into the HTML <head> section
+    
+    tags$style(  # Define custom CSS styles for the whole app
+      
+      HTML("  /* Start writing raw CSS code inside an HTML string */
+
+      /* =========================
+         Modal Layer Fix
+         ========================= */
+
+      .modal {  /* Select the white popup modal box */
+        z-index: 1000001 !important;  /* Keep the modal above the sticky Dynamic Island header */
+      }
+
+      .modal-backdrop {  /* Select the dark overlay behind the popup modal */
+        z-index: 1000000 !important;  /* Keep the overlay above the page but below the modal box */
+      }
+
+      .modal-dialog {  /* Select the popup dialog container */
+        margin-top: 130px;  /* Push the popup slightly downward so it does not overlap the header */
+      }
+
+      /* =========================
+         Global Page Styling
+         ========================= */
+
+      body {  /* Style the whole app background and default text */
+        background-color: #f8f9ff;  /* Set a very light blue-gray background color */
+        background-image:  /* Add two dotted radial-gradient background layers */
+          radial-gradient(circle, #e0e8ff 7%, transparent 8%),  /* Add soft blue dots */
+          radial-gradient(circle, #ffe8f0 7%, transparent 8%);  /* Add soft pink dots */
+        background-size: 42px 42px;  /* Control the repeating dot spacing */
+        background-position: 0 0, 21px 21px;  /* Offset the second dot layer for a balanced pattern */
+        color: #2d3748;  /* Set the default text color */
+        font-family: 'Segoe UI', Tahoma, sans-serif;  /* Use a clean modern font stack */
+        margin: 0;  /* Remove default browser margin */
+        padding: 0;  /* Remove default browser padding */
+      }
+
+      .container-fluid {  /* Style Shiny's main page container */
+        max-width: 1900px;  /* Prevent the page from becoming too stretched on wide screens */
+      }
+
+      /* =========================
+         Dynamic Island Header
+         ========================= */
+
+      .dynamic-island {  /* Style the custom floating navigation header */
+        background: rgba(255,255,255,0.92);  /* Use a semi-transparent white background */
+        backdrop-filter: blur(16px);  /* Add glass blur effect for modern UI */
+        -webkit-backdrop-filter: blur(16px);  /* Add Safari-compatible blur effect */
+        border-radius: 34px;  /* Make the header corners rounded like a Dynamic Island */
+        padding: 18px 28px;  /* Add inner spacing around title and buttons */
+        margin: 14px auto 22px auto;  /* Center the header and add vertical spacing */
+        box-shadow: 0 10px 30px rgba(0,0,0,0.08);  /* Add soft floating shadow */
+        text-align: center;  /* Center-align title, subtitle, and buttons */
+        width: 86%;  /* Let the header occupy most of the page width */
+        max-width: 1180px;  /* Prevent the header from becoming too wide */
+        position: sticky;  /* Keep the header visible while scrolling */
+        top: 12px;  /* Keep a small gap from the top of the browser */
+        z-index: 99999;  /* Place the header above normal page content */
+        border: 1px solid rgba(226,232,240,0.9);  /* Add a subtle border */
+        transition: all 0.25s ease;  /* Smooth visual changes */
+      }
+
+      .dynamic-island h1 {  /* Style the main platform title inside the header */
+        font-size: 30px;  /* Set title size */
+        font-weight: 700;  /* Make the title bold */
+        margin: 0;  /* Remove default heading margin */
+        color: #334155;  /* Use a dark blue-gray title color */
+        letter-spacing: 0.2px;  /* Slightly improve title spacing */
+      }
+
+      .dynamic-island .sub-title {  /* Style the subtitle inside the header */
+        font-size: 14px;  /* Set subtitle size */
+        color: #718096;  /* Use a muted gray-blue subtitle color */
+        margin-top: 6px;  /* Add small spacing above subtitle */
+        margin-bottom: 12px;  /* Add spacing between subtitle and buttons */
+      }
+
+/* Opening page language button row */
+.opening-lang-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+/* Opening page language buttons */
+.opening-lang-btn {
+  background: rgba(255,255,255,0.96) !important;
+  color: #2d3748 !important;
+  border: 1px solid #d8dee9 !important;
+  border-radius: 14px !important;
+  padding: 8px 16px !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  box-shadow: 0 5px 14px rgba(0,0,0,0.07) !important;
+  transition: all 0.18s ease-in-out !important;
+}
+
+/* Active opening language button */
+.opening-lang-active {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+  color: white !important;
+  border: 1px solid transparent !important;
+}
+
+/* Hover effect */
+.opening-lang-btn:hover {
+  transform: translateY(-2px);
+}
+
+      /* =========================
+         Navigation Button Layout
+         ========================= */
+
+      .island-buttons {  /* Style the container holding all navigation buttons */
+        display: flex;  /* Use flexbox to align buttons */
+        justify-content: center;  /* Center buttons horizontally */
+        align-items: center;  /* Align buttons vertically */
+        flex-wrap: wrap;  /* Allow buttons to wrap on smaller screens */
+        gap: 8px;  /* Add consistent spacing between buttons */
+      }
+
+      /* =========================
+         Default navigation button style
+         =========================
+         All buttons are white by default.
+      */
+      .island-btn {
+        background: rgba(255,255,255,0.96) !important;
+        color: #2d3748 !important;
+        border: 1px solid #d8dee9 !important;
+        border-radius: 999px !important;
+        padding: 8px 14px !important;
+        font-weight: 500 !important;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.04);
+        transition: all 0.18s ease-in-out;
+      }
+      
+      /* =========================
+         Active navigation button style
+         =========================
+         The currently selected page button becomes blue.
+      */
+      .island-btn.active {
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+        color: white !important;
+        border: 1px solid transparent !important;
+        box-shadow: 0 5px 16px rgba(37,99,235,0.42);
+      }
+      
+      /* =========================
+         Hover effect for inactive buttons only
+         =========================
+         Important:
+         Use .island-btn:not(.active):hover so the active blue button
+         will NOT be overwritten by hover styling.
+      */
+      .island-btn:not(.active):hover {
+        background: #edf6ff !important;
+        color: #1f5f99 !important;
+        transform: translateY(-2px) scale(1.03);
+        box-shadow: 0 5px 14px rgba(0,0,0,0.12);
+      }
+      
+      /* =========================
+         Hover effect for active button
+         =========================
+         The active button stays blue even when hovered.
+      */
+      .island-btn.active:hover {
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+        color: white !important;
+        transform: translateY(-2px) scale(1.03);
+        box-shadow: 0 6px 18px rgba(37,99,235,0.50);
+      }
+      
+      /* =========================
+         Top Control Bar
+         =========================
+         This bar contains language buttons and BGM buttons.
+         It is aligned to the right side below the Dynamic Island header.
+      */
+      .top-control-bar {
+        width: 86%;
+        max-width: 1180px;
+        margin: -6px auto 18px auto;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 12px;
+      }
+      
+      /* =========================
+         Language Button Style
+         ========================= */
+      .lang-btn {
+        background: rgba(255,255,255,0.96) !important;
+        color: #2d3748 !important;
+        border: 1px solid #d8dee9 !important;
+        border-radius: 14px !important;
+        padding: 10px 18px !important;
+        font-weight: 700 !important;
+        font-size: 15px !important;
+        box-shadow: 0 5px 14px rgba(0,0,0,0.07) !important;
+        transition: all 0.18s ease-in-out !important;
+      }
+      
+      /* Active language button */
+      .lang-btn-active {
+        background: #ffffff !important;
+        color: #1f2937 !important;
+        border: 2px solid #d8dee9 !important;
+      }
+      
+      /* Hover effect for language buttons */
+      .lang-btn:hover {
+        transform: translateY(-2px);
+        background: #edf6ff !important;
+        color: #1f5f99 !important;
+      }
+      
+      /* =========================
+         BGM Button Base Style
+         ========================= */
+      .bgm-btn {
+        border: none !important;
+        border-radius: 14px !important;
+        padding: 10px 18px !important;
+        font-weight: 700 !important;
+        font-size: 15px !important;
+        box-shadow: 0 6px 16px rgba(0,0,0,0.10) !important;
+        transition: all 0.18s ease-in-out !important;
+      }
+      
+      /* Play button color */
+      .play-bgm-btn {
+        background: #72c8bd !important;
+        color: white !important;
+      }
+      
+      /* Pause button color */
+      .pause-bgm-btn {
+        background: #f4b28f !important;
+        color: white !important;
+      }
+      
+      /* Hover effect for BGM buttons */
+      .bgm-btn:hover {
+        transform: translateY(-2px);
+        opacity: 0.92;
+      }
+
+      /* =========================
+         Card and Panel Styling
+         ========================= */
+
+      .modern-card {  /* Style main content cards */
+        background: rgba(255,255,255,0.96);  /* Use near-white card background */
+        border-radius: 18px;  /* Round card corners */
+        padding: 22px;  /* Add inner spacing */
+        box-shadow: 0 8px 24px rgba(0,0,0,0.06);  /* Add soft card shadow */
+        border: 1px solid rgba(226,232,240,0.9);  /* Add subtle card border */
+        margin-bottom: 24px;  /* Add spacing below each card */
+      }
+
+      .well {  /* Style Shiny wellPanel sidebars */
+        background-color: rgba(255,255,255,0.95);  /* Use clean white sidebar background */
+        border: none;  /* Remove default Bootstrap border */
+        border-radius: 16px;  /* Round sidebar corners */
+        box-shadow: 0 6px 20px rgba(0,0,0,0.06);  /* Add soft sidebar shadow */
+        padding: 20px;  /* Add inner sidebar spacing */
+        
+        position: fixed;
+        /* Fix the info ball/card on the screen, so it stays visible while scrolling */
+        
+        left: 150px;
+        /* Put the info ball near the left side of the Dynamic Island */
+        /* Increase this value to move right; decrease it to move left */
+        
+        top: 118px;
+        /* Vertically align the info ball around the middle-left of the Dynamic Island */
+        /* Increase this value to move lower; decrease it to move higher */
+        
+        z-index: 9998;
+        /* Keep it above normal content, but below the Dynamic Island header */
+              }
+
+      /* =========================
+   Interactive Sidebar Explanation Cards
+   =========================
+   This applies to all wellPanel() explanation cards
+   across the six pages:
+   Cleaning, Correlation, Ranking, Profile, Map, and Radar.
+*/
+
+/* Add animation behavior to every sidebar card */
+.well {
+  position: relative;                /* Allows the floating label to be positioned inside the card */
+  transition: all 0.22s ease-in-out; /* Makes hover animation smooth */
+  cursor: pointer;                   /* Shows that the card is interactive */
+}
+
+/* Hover effect for all sidebar explanation cards */
+.well:hover {
+  transform: translateY(-6px) scale(1.015);          /* Move the card upward and slightly enlarge it */
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.16);   /* Add stronger blue shadow */
+  border: 1px solid rgba(59, 130, 246, 0.35);        /* Add subtle blue border */
+  background-color: rgba(255, 255, 255, 0.98);       /* Make the card slightly brighter */
+}
+
+/* Smooth heading color change */
+.well h4 {
+  transition: color 0.22s ease-in-out; /* Smoothly changes heading color */
+}
+
+/* Headings become blue when the card is hovered */
+.well:hover h4 {
+  color: #1d4ed8; /* Blue heading color on hover */
+}
+
+/* =========================
+   Apple-style floating info ball/card
+   =========================
+   This effect is applied only to panels with class info-float.
+   It will NOT affect normal wellPanel controls such as Map dropdowns.
+*/
+
+/* Default collapsed state: small info ball */
+.info-float {
+  position: fixed;
+  /* Fix the info ball/card on the screen */
+
+  left: 42px;
+  /* Horizontal position of the info ball */
+
+  top: 70px;
+  /* Vertical position of the info ball */
+
+  width: 72px;
+  /* Collapsed ball width */
+
+  height: 72px;
+  /* Collapsed ball height */
+
+  min-height: 72px;
+  /* Keep collapsed ball size stable */
+
+  overflow: hidden;
+  /* Hide Markdown content when collapsed */
+
+  border-radius: 999px;
+  /* Make collapsed state a circle */
+
+  padding: 0 !important;
+  /* Remove normal padding when collapsed */
+
+  cursor: pointer;
+  /* Show that the ball is interactive */
+
+  transition: all 0.35s ease-in-out;
+  /* Smooth expand/collapse animation */
+
+  background: rgba(255, 255, 255, 0.18);
+  /* Very transparent glass background */
+
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  /* Light glass blur */
+
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  /* Light blue border */
+
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.08);
+  /* Soft floating shadow */
+
+  z-index: 1000000;
+  /* Keep the floating info card above Dynamic Island but below modal */
+}
+
+/* Small info icon inside collapsed ball */
+.info-float::before {
+  content: 'i';
+  /* Information icon text */
+
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: white;
+
+  font-size: 24px;
+  font-weight: 800;
+  font-family: Georgia, serif;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  transition: all 0.25s ease-in-out;
+}
+
+/* Hide Markdown content in collapsed state */
+.info-float > * {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.25s ease-in-out;
+}
+
+/* Expanded transparent floating card */
+.info-float:hover {
+  width: 430px;
+  /* Expanded card width */
+
+  max-height: 68vh;
+  /* Limit expanded height */
+
+  height: auto;
+  min-height: 240px;
+
+  overflow-y: auto;
+  /* Allow long explanation text to scroll inside */
+
+  border-radius: 26px;
+  padding: 24px !important;
+
+  background: rgba(255, 255, 255, 0.18);
+  /* Very transparent expanded background */
+
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  border: 1px solid rgba(59, 130, 246, 0.40);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.08);
+
+  transform: translateY(-6px);
+}
+
+/* Keep the small info icon visible after expansion */
+.info-float:hover::before {
+  opacity: 1;
+  top: 14px;
+  left: auto;
+  right: 58px;
+  transform: scale(0.62);
+}
+
+/* Show Markdown content after expansion */
+.info-float:hover > * {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Make headings blue when expanded */
+.info-float:hover h4 {
+  color: #1d4ed8;
+}
+
+/* Smooth heading color transition */
+.info-float h4 {
+  transition: color 0.25s ease-in-out;
+}
+
+
+
+      .control-group {  /* Style grouped map controls or input sections */
+        margin-bottom: 25px;  /* Add spacing below each control group */
+      }
+
+/* =========================
+   Make Focus on Country dropdown behave like Sort dropdown
+   ========================= */
+
+/* Limit dropdown height so it will not cover the Quick Jump section too much */
+.selectize-dropdown-content {
+  max-height: 170px !important;
+  overflow-y: auto !important;
+}
+
+/* Keep the dropdown clean and solid */
+.selectize-dropdown {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(148, 163, 184, 0.45) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14) !important;
+  z-index: 1000002 !important;
+}
+
+/* Make each option readable */
+.selectize-dropdown .option {
+  background: white !important;
+  color: #1f2937 !important;
+  padding: 7px 12px !important;
+  font-size: 14px !important;
+}
+
+/* Blue highlight for the active option */
+.selectize-dropdown .active {
+  background: #3b82f6 !important;
+  color: white !important;
+}
+
+/* =========================
+   Radar page floating card position
+   =========================
+   Keep the Radar explanation as a floating card,
+   but make it narrower so it does not cover the radar plot.
+*/
+
+.radar-float {
+  left: 26px !important;
+  /* Put the Radar info ball close to the left edge */
+
+  top: 250px !important;
+  /* Place it below the header and language buttons */
+
+  z-index: 1000000 !important;
+  /* Keep it above charts when expanded */
+}
+
+.radar-float:hover {
+  width: 300px !important;
+  /* Make the expanded Radar card narrower */
+
+  max-height: 66vh !important;
+  /* Keep the card scrollable if the Markdown is long */
+
+  padding: 18px !important;
+  /* Reduce inner spacing so more text fits */
+
+  background: rgba(255, 255, 255, 0.50) !important;
+  /* Semi-transparent but readable */
+
+  backdrop-filter: blur(5px) !important;
+  -webkit-backdrop-filter: blur(5px) !important;
+  /* Light blur, so the chart behind is not heavily blocked */
+}
+/* =========================
+   Radar info icon special position
+   =========================
+   Move the Radar i icon away from the title.
+*/
+/* =========================
+   Radar info icon special position
+   =========================
+   Put the Radar i icon slightly outside the card
+   so it will not cover the long title.
+*/
+    .radar-float:hover::before {
+      opacity: 1 !important;
+    
+      top: 12px !important;
+      left: auto !important;
+      right: -14px !important;
+    
+      transform: scale(0.62) !important;
+    }
+
+}
+
+      .btn-jump {  /* Style quick-jump buttons if used in the map page */
+        margin: 4px;  /* Add spacing around small buttons */
+        padding: 5px 10px;  /* Add compact inner spacing */
+        border-radius: 4px;  /* Slightly round small buttons */
+      }
+
+      .view-all-btn {  /* Style wider map reset or batch-view buttons */
+        margin-bottom: 15px;  /* Add spacing below the button */
+        font-weight: bold;  /* Make important buttons bold */
+      }
+
+      hr {  /* Style horizontal separator lines */
+        margin-top: 20px;  /* Add spacing above the line */
+        margin-bottom: 20px;  /* Add spacing below the line */
+      }
+      
+      /* =========================
+         Main content spacing
+         =========================
+         Add spacing below the sticky header so large visualizations
+         such as the map and radar chart are not covered.*/
+         
+      .tab-content {
+        padding-top: 26px;
+      }
+      
+      /* Add a little spacing inside each hidden tab page */
+      
+      .tab-pane {
+        padding-top: 10px;
+      }
+      
+      /* =========================
+   Opening / Welcome Page Overlay
+   =========================
+   This full-screen opening page appears when the app first loads.
+   It introduces PM2.5 with a typewriter animation,
+   then shows a welcome message loaded from Markdown and a Start button.
+*/
+
+.opening-overlay {
+  position: fixed;
+  /* Fix the opening page on top of the whole browser window */
+
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  /* Make the overlay cover the full screen */
+
+  z-index: 2000000;
+  /* Keep the opening page above all app elements, including maps and floating cards */
+
+  background-color: #f8f9ff;
+  /* Use the same light background as the main app */
+
+  background-image:
+    radial-gradient(circle, #dbeafe 7%, transparent 8%),
+    radial-gradient(circle, #ffe4ec 7%, transparent 8%);
+  /* Add soft blue and pink dotted background */
+
+  background-size: 42px 42px;
+  background-position: 0 0, 21px 21px;
+  /* Control dot spacing and offset */
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Center the opening card */
+
+  transition: opacity 0.7s ease, visibility 0.7s ease;
+  /* Smooth fade-out after clicking Start */
+}
+
+.opening-overlay.hide-opening {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Hide the opening page after Start is clicked */
+}
+
+.opening-card {
+  width: min(820px, 86vw);
+  /* Card width adapts to screen size */
+
+  min-height: 420px;
+  /* Keep enough height for the typewriter and welcome text */
+
+  background: rgba(255, 255, 255, 0.78);
+  /* Semi-transparent glass card */
+
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  /* Glass blur effect */
+
+  border: 1px solid rgba(191, 219, 254, 0.95);
+  border-radius: 34px;
+  /* Rounded card corners */
+
+  box-shadow: 0 24px 70px rgba(37, 99, 235, 0.18);
+  /* Soft blue shadow */
+
+  padding: 56px 60px;
+  /* Inner spacing */
+
+  text-align: center;
+  color: #1f2937;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Typewriter text area */
+.opening-typewriter {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.55;
+  color: #1d4ed8;
+
+  min-height: 150px;
+  max-width: 720px;
+  margin-bottom: 26px;
+}
+
+/* Blinking cursor after the typing text */
+.opening-cursor {
+  display: inline-block;
+  margin-left: 4px;
+  color: #1d4ed8;
+  animation: blinkCursor 0.8s infinite;
+}
+
+/* Cursor blinking animation */
+@keyframes blinkCursor {
+  0%, 45% {
+    opacity: 1;
+  }
+
+  46%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Final welcome message area */
+.opening-final {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: all 0.7s ease;
+  /* Hidden first, then fades in after typewriter animation */
+}
+
+.opening-final.show-final {
+  opacity: 1;
+  transform: translateY(0);
+  /* Show final welcome content */
+}
+
+/* Markdown title style inside the opening page */
+.opening-final h2 {
+  font-size: 34px;
+  font-weight: 800;
+  color: #334155;
+  margin-bottom: 18px;
+}
+
+/* Markdown paragraph style inside the opening page */
+.opening-final p {
+  font-size: 18px;
+  line-height: 1.8;
+  color: #475569;
+  margin-bottom: 30px;
+}
+
+/* Game-style Start button */
+.start-btn {
+  border: none !important;
+  border-radius: 999px !important;
+  padding: 14px 42px !important;
+
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+  color: white !important;
+
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.5px;
+
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.38) !important;
+  transition: all 0.2s ease-in-out !important;
+}
+
+/* Start button hover effect */
+.start-btn:hover {
+  transform: translateY(-3px) scale(1.04);
+  box-shadow: 0 16px 38px rgba(37, 99, 235, 0.48) !important;
+}
+
+/* =========================
+   Final Page Horizontal Layout
+   ========================= */
+
+/* Final page container:
+   no large white background, keep dotted background visible. */
+.final-page-card {
+  min-height: 820px;
+  padding: 38px 12px 70px 12px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Main title */
+.final-main-title {
+  text-align: center;
+  font-size: 42px;
+  font-weight: 900;
+  color: #1f2937;
+  margin-top: 8px;
+  margin-bottom: 14px;
+  transform: translateX(-160px);
+}
+
+/* Subtitle */
+.final-subtitle {
+  max-width: 1050px;
+  margin: 0 auto 70px auto;
+  text-align: center;
+  font-size: 19px;
+  line-height: 1.7;
+  color: #475569;
+  transform: translateX(-160px);
+}
+
+/* Board containing three cards in one horizontal row */
+.final-horizontal-board {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto 52px auto;
+  transform: translateX(-160px);
+
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 32px;
+
+  flex-wrap: nowrap;
+  background: transparent !important;
+}
+
+/* Each horizontal card contains text on top and polaroid below */
+.final-horizontal-card {
+  width: 31%;
+  min-width: 290px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Text block above each image */
+.final-horizontal-text {
+  width: 100%;
+  min-height: 250px;
+  text-align: left;
+  background: transparent !important;
+}
+
+/* Big blue heading */
+.final-horizontal-text h3 {
+  color: #111111;
+  font-weight: 900;
+  font-size: 34px;
+  line-height: 1.18;
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+/* Larger paragraph */
+.final-horizontal-text p {
+  font-size: 18px;
+  line-height: 1.65;
+  color: #334155;
+  margin-bottom: 16px;
+}
+
+/* Source link */
+.image-credit {
+  display: inline-block;
+  font-size: 12px;
+  font-style: italic;
+  color: #64748b;
+  text-decoration: underline;
+}
+
+/* Polaroid image frame */
+.final-horizontal-polaroid {
+  width: 100%;
+  background: #ffffff;
+  padding: 16px 16px 58px 16px;
+  border-radius: 14px;
+  box-shadow: 0 24px 50px rgba(15, 23, 42, 0.16);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  transition: all 0.25s ease-in-out;
+}
+
+/* Image inside polaroid */
+.final-horizontal-img {
+  width: 100%;
+  height: 205px;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+}
+
+/* Slight rotations */
+.rotate-left {
+  transform: rotate(-4deg);
+}
+
+.rotate-middle {
+  transform: rotate(1deg);
+}
+
+.rotate-right {
+  transform: rotate(4deg);
+}
+
+/* Hover effect */
+.final-horizontal-polaroid:hover {
+  transform: translateY(-8px) scale(1.025) rotate(0deg) !important;
+  box-shadow: 0 30px 62px rgba(37, 99, 235, 0.24);
+}
+
+/* Final message */
+.final-image-message {
+  text-align: center;
+  font-size: 30px;
+  font-weight: 900;
+  color: #1d4ed8;
+  margin-top: 34px;
+  margin-bottom: 34px;
+}
+
+/* Smaller screen: allow wrapping */
+@media (max-width: 1250px) {
+  .final-horizontal-board {
+    flex-wrap: wrap;
+  }
+
+  .final-horizontal-card {
+    width: 44%;
+  }
+}
+
+@media (max-width: 850px) {
+  .final-horizontal-card {
+    width: 88%;
+  }
+
+  .final-horizontal-text {
+    text-align: center;
+  }
+}
+
+      ")  # End raw CSS string
+      
+    )  # End tags$style
+    
+  ),  # End tags$head
+  
+  div(  # Create the custom top navigation area
+    
+    class = "dynamic-island",  # Apply the Dynamic Island CSS class
+    
+    h1("Global Air Quality Research Platform"),  # Display the main app title
+    
+    div(  # Create subtitle container
+      
+      class = "sub-title",  # Apply subtitle CSS class
+      
+      "PM2.5 Distribution & Pollutant Analysis"  # Display subtitle text
+      
+    ),  # End subtitle div
+    
+    # =========================
+    # Navigation button group
+    # =========================
+    # These buttons are custom navigation buttons for the hidden tabsetPanel.
+    # Only the first button has "active" at app startup.
+    # Important: do NOT add "active" to all buttons, otherwise all buttons will be blue.
+    div(
+      class = "island-buttons",
+      
+      # Cleaning is active by default because the app starts on the Cleaning page.
+      actionButton("go_cleaning", "Cleaning", class = "island-btn active"),
+      
+      # Other buttons should NOT have "active" initially.
+      actionButton("go_correlation", "Correlation", class = "island-btn"),
+      actionButton("go_ranking", "Ranking", class = "island-btn"),
+      actionButton("go_profile", "Profile", class = "island-btn"),
+      actionButton("go_map", "Map", class = "island-btn"),
+      actionButton("go_radar", "Radar", class = "island-btn"),
+      # Final page button
+      
+      # This button opens the final call-to-action page.
+      
+      actionButton("go_final", "Final", class = "island-btn")
+    ),
+    
+    
+  ),  # End Dynamic Island header
+  
+  
+  # =========================
+  # Top Control Bar: Language + BGM
+  # =========================
+  # This section is placed below the Dynamic Island header.
+  # It contains language buttons and background music controls.
+  div(
+    class = "top-control-bar",
+    
+    # -------------------------
+    # Hidden audio element
+    # -------------------------
+    # The audio file should be saved in the www folder.
+    # Example file path: www/bgm.mp3
+    # The audio player itself is hidden because we use custom buttons.
+    tags$audio(
+      id = "bgm_audio",
+      src = "bgm.mp3",
+      type = "audio/mpeg",
+      loop = TRUE
+    ),
+    
+    # -------------------------
+    # Language buttons
+    # -------------------------
+    # These buttons visually provide language options.
+    # You can later connect them to translated text if needed.
+    actionButton(
+      inputId = "lang_en",
+      label = "English",
+      class = "lang-btn lang-btn-active"
+    ),
+    
+    actionButton(
+      inputId = "lang_zh",
+      label = "中文",
+      class = "lang-btn"
+    ),
+    
+    actionButton(
+      inputId = "lang_ja",
+      label = "日本語",
+      class = "lang-btn"
+    ),
+    
+    # -------------------------
+    # Background music buttons
+    # -------------------------
+    # Play button: starts the background music.
+    actionButton(
+      inputId = "play_bgm",
+      label = "Play BGM",
+      class = "bgm-btn play-bgm-btn",
+      onclick = "document.getElementById('bgm_audio').play();"
+    ),
+    
+    # Pause button: pauses the background music.
+    actionButton(
+      inputId = "pause_bgm",
+      label = "Pause",
+      class = "bgm-btn pause-bgm-btn",
+      onclick = "document.getElementById('bgm_audio').pause();"
     )
   ),
   
-  titlePanel("Pollutant Correlation Heatmap After Data Cleaning"),
+  # =========================
+  # Put your tabsetPanel(...) immediately below this line
+  # =========================
+  
+  #titlePanel("Pollutant Correlation Heatmap After Data Cleaning"),
   
   tabsetPanel(
+    id = "main_tabs",     # Unique ID for this tabset (used for button control)
+    type = "hidden",      # Hide the default tab navigation bar (we will use buttons instead)
     
     # =========================
     # Page 1: Data Cleaning Summary
     # =========================
     # Create a tab panel in the main dashboard for cleaning statistics
     tabPanel(
-      "Data Cleaning Summary",
+      "Cleaning",
       
       # fluidRow creates a responsive horizontal row that adapts to screen size
       fluidRow(
@@ -853,32 +2070,40 @@ ui <- fluidPage(
         column(
           width = 3,
           
-          # wellPanel provides a gray inset box to visually group the text
           wellPanel(
-            h4("Purpose"), # Fourth-level heading
-            p("This page summarizes the data-cleaning process before visualization."), # Paragraph text
-            p("It shows how many observations were kept after each cleaning step."),
-            p("It also lists countries removed during PM2.5 country-level cleaning."),
-            tags$hr(), # Inserts a horizontal rule (line) separator
-            
-            h4("Cleaning Logic"),
-            p("First, missing or invalid observations are removed."),
-            p("Then, countries with unreliable PM2.5 records are removed."),
-            p("Countries with fewer than 3 PM2.5 observations or all-zero PM2.5 values are excluded.")
+            class = "info-float",
+            # Dynamic Markdown output for the Cleaning page.
+            # The actual Markdown file is selected in the server by output$cleaning_about.
+            # It changes according to the selected language:
+            # English -> about/cleaning_en.md
+            # Chinese -> about/cleaning_zh.md
+            # Japanese -> about/cleaning_ja.md
+            uiOutput("cleaning_about")
           )
         ),
         
         # Main Column (Width 9 out of 12): Contains charts and tables
         column(
           width = 9,
-          h3("Observation Count Before and After Cleaning"),# Third-level heading
           
-          # plotOutput displays the bar chart generated in the server logic
-          plotOutput("cleaning_count_plot", height = "520px"),
-          br(),# Inserts a line break for vertical spacing
-          h3("Removed Countries by Cleaning Rule"),
-          # tableOutput displays the static table listing excluded countries
-          tableOutput("removed_countries_table")
+          # Modern card wrapper for the main content area
+          div(
+            class = "modern-card",
+            
+            # Section title for the cleaning-stage bar chart
+            h3("Observation Count Before and After Cleaning"),
+            
+            # Bar chart generated from output$cleaning_count_plot in the server
+            plotOutput("cleaning_count_plot", height = "520px"),
+            
+            br(),
+            
+            # Section title for the removed-country table
+            h3("Removed Countries by Cleaning Rule"),
+            
+            # Table generated from output$removed_countries_table in the server
+            tableOutput("removed_countries_table")
+          )
         )
       )
     ),
@@ -889,47 +2114,36 @@ ui <- fluidPage(
     
     # Define a tab panel for the correlation analysis
     tabPanel(
-      "Pollutant Correlation",
+      "Correlation",
       
       # Organize the content into a responsive row
       fluidRow(
         # Left Column (Width 3/12): Sidebar containing app information and rules
         column(
           width = 3,
-          # Use a wellPanel to group documentation and notes visually
           wellPanel(
-            h4("App Functions"),
-            p("1. Clean invalid air-quality observations."),
-            p("2. Remove countries with unreliable PM2.5 data."),
-            p("3. Calculate country-level average pollutant values."),
-            p("4. Display pollutant-by-pollutant correlations."),
-            p("5. Click a non-diagonal cell to generate a regression plot."),
-            tags$hr(),# Horizontal line separator
-            
-            h4("Cleaning Rules"),
-            p("1. Remove missing country, pollutant, and value."),
-            p("2. Remove negative pollutant values."),
-            p("3. Remove countries with fewer than 3 PM2.5 observations."),
-            p("4. Remove countries whose PM2.5 values are all zero."),
-            tags$hr(),
-            
-            # Display the list of selected countries (Top 3 and Bottom 3)
-            strong("PM2.5 selected countries:"),
-            p(paste(selected_countries, collapse = ", ")),
-            tags$hr(),
-            
-            # Important technical note about the heatmap logic
-            p("Note: Diagonal cells are disabled because self-correlation is always 1.")
+            class = "info-float",
+            # Dynamic Markdown output for the Correlation page.
+            # The actual Markdown file is selected in the server by output$correlation_about.
+            # It changes according to the selected language:
+            # English -> about/correlation_en.md
+            # Chinese -> about/correlation_zh.md
+            # Japanese -> about/correlation_ja.md
+            uiOutput("correlation_about")
           )
         ),
         
         # Right Column (Width 9/12): Main display area for the heatmap
         column(
           width = 9,
-          
-          # plotlyOutput displays the interactive correlation heatmap
-          # Set to a large height (900px) for high visibility of the matrix
-          plotlyOutput("heatmap", height = "900px")
+          # Modern card for the main correlation heatmap
+          div(
+            class = "modern-card",
+            h3("Pollutant Correlation Heatmap"),
+            # plotlyOutput displays the interactive correlation heatmap
+            # Set to a large height (900px) for high visibility of the matrix
+            plotlyOutput("heatmap", height = "900px")
+          )
         )
       ),
       
@@ -941,13 +2155,19 @@ ui <- fluidPage(
           
           # [Text Output]
           # Displays status information about the current selection
-          verbatimTextOutput("info"),
+          # verbatimTextOutput("info"),
           
-          # [Interactive Plot Output]
-          # Displays the scatter plot and linear regression trend line.
-          # Using plotlyOutput allows the user to hover over points for 
-          # specific values and zoom in on data clusters.
-          plotlyOutput("reg_plot", height = "750px")
+          # Modern card for selected-pair information and regression plot
+          div(
+            class = "modern-card",
+            verbatimTextOutput("info"),
+            
+            # [Interactive Plot Output]
+            # Displays the scatter plot and linear regression trend line.
+            # Using plotlyOutput allows the user to hover over points for 
+            # specific values and zoom in on data clusters.
+            plotlyOutput("reg_plot", height = "750px")
+          )
         )
       )
     ),
@@ -958,7 +2178,7 @@ ui <- fluidPage(
     
     # Define a tab panel for the global country ranking visualization
     tabPanel(
-      "PM2.5 Country Ranking",
+      "Ranking",
       
       # Organize the content into a responsive row
       fluidRow(
@@ -967,36 +2187,29 @@ ui <- fluidPage(
         column(
           width = 3,
           
-          # Use a wellPanel to group documentation and highlights visually
           wellPanel(
-            h4("PM2.5 Ranking"), # Header for the sidebar section
-            p("This page shows the final country ranking by average PM2.5 after data cleaning."),
-            p("Countries are sorted from highest to lowest average PM2.5."),
-            tags$hr(), # Horizontal line separator
-            
-            # Display the specific names of the highest-pollution countries
-            strong("Top 3 polluted countries:"),
-            p(paste(top3_pm25_after$country, collapse = ", ")),
-            tags$hr(),
-            
-            # Display the specific names of the lowest-pollution countries
-            strong("Bottom 3 cleanest countries:"),
-            p(paste(bottom3_pm25_after$country, collapse = ", ")),
-            tags$hr(),
-            
-            # Clarify the measurement unit being used (e.g., µg/m³)
-            strong("PM2.5 unit:"),
-            p(pm25_unit)
+            class = "info-float",
+            # Dynamic Markdown output for the Ranking page.
+            # The actual Markdown file is selected in the server by output$ranking_about.
+            # It changes according to the selected language:
+            # English -> about/ranking_en.md
+            # Chinese -> about/ranking_zh.md
+            # Japanese -> about/ranking_ja.md
+            uiOutput("ranking_about")
           )
         ),
         
         # Right Column (Width 9/12): Main display area for the ranking chart
         column(
           width = 9,
-          h3("Final Country Ranking by Average PM2.5"),
-          # plotOutput displays the ranking bar chart generated in the server logic
-          # Set to a large height (720px) to accommodate many country bars
-          plotOutput("pm25_ranking_plot", height = "720px")
+          # Modern card for the PM2.5 ranking chart
+          div(
+            class = "modern-card",
+            h3("Final Country Ranking by Average PM2.5"),
+            # plotOutput displays the ranking bar chart generated in the server logic
+            # Set to a large height (720px) to accommodate many country bars
+            plotOutput("pm25_ranking_plot", height = "720px")
+          )
         )
       )
     ),
@@ -1007,46 +2220,50 @@ ui <- fluidPage(
     
     # Define a tab panel for analyzing pollutant correlations inside specific countries
     tabPanel(
-      "Country PM2.5 Profile",
+      "Profile",
       # Left Column (Width 3/12): Documentation and instructions
       fluidRow(
         column(
           width = 3,
           wellPanel(
-            h4("Country Profile"),# Section header
-            p("This page shows within-country correlations between PM2.5 and other pollutants."),
-            p("The x-axis shows the top 3 and bottom 3 PM2.5 countries after cleaning."),
-            p("The color represents the correlation between PM2.5 and each pollutant inside the selected country."),
-            p("Blank cells mean that there are not enough paired observations for a reliable correlation."),
-            tags$hr(),
-            # Reference information
-            strong("Countries included:"),
-            p(paste(selected_countries, collapse = ", ")),
-            tags$hr(),
-            
-            strong("PM2.5 unit:"),
-            p(pm25_unit),
-            tags$hr(),
-            # Instructions for the interactive features
-            p("Hover over each tile to see country, pollutant, correlation, paired observations, and unit."),
-            p("Click a tile to analyze the relationship between PM2.5 and the selected pollutant within that country.")
+            class = "info-float",
+            # Dynamic Markdown output for the Country Profile page.
+            # The actual Markdown file is selected in the server by output$profile_about.
+            # It changes according to the selected language:
+            # English -> about/profile_en.md
+            # Chinese -> about/profile_zh.md
+            # Japanese -> about/profile_ja.md
+            uiOutput("profile_about")
           )
         ),
         # Right Column (Width 9/12): The interactive country-pollutant heatmap
         column(
           width = 9,
-          # Displays the correlation matrix for specific countries
-          plotlyOutput("country_pollutant_heatmap", height = "800px")
+          # Modern card for the country-pollutant heatmap
+          
+          div(
+            class = "modern-card",
+            h3("Country PM2.5 Pollutant Profile"),
+            
+            # Displays the correlation matrix for specific countries
+            plotlyOutput("country_pollutant_heatmap", height = "800px")
+          )
         )
       ),
       # Bottom Row: Dedicated space for the regression analysis of a clicked tile
       fluidRow(
         column(
           width = 12,
-          # Shows text info about the specific country/pollutant selected
-          verbatimTextOutput("country_profile_info"),
-          # Renders the scatter plot and trend line for the selected country
-          plotlyOutput("country_profile_reg_plot", height = "720px")
+          # Modern card for selected country-pollutant information and regression plot
+          div(
+            class = "modern-card",
+            verbatimTextOutput("country_profile_info"),
+            
+            # Shows text info about the specific country/pollutant selected
+            verbatimTextOutput("country_profile_info"),
+            # Renders the scatter plot and trend line for the selected country
+            plotlyOutput("country_profile_reg_plot", height = "720px")
+          )
         )
       )
     ),
@@ -1056,14 +2273,31 @@ ui <- fluidPage(
     # =========================
     # Define a tab panel for the geospatial visualization
     tabPanel(
-      "Global PM2.5 Map",
+      "Map",
       
-      br(), # Vertical spacing at the top
+      # Add a controlled vertical gap below the sticky Dynamic Island header.
+      # Compared with br(), this gives more stable spacing for large Leaflet maps.
+      # It helps prevent the header from visually covering the top of the map page.
+      div(style = "height: 18px;"),
+      
       fluidRow(
+        
         # Left Column (Width 3/12): Navigation and Control Panel
         column(
           width = 3,
           wellPanel(
+            class = "info-float",
+            # Dynamic Markdown output for the Map page.
+            # The actual Markdown file is selected in the server by output$map_about.
+            # It changes according to the selected language:
+            # English -> about/map_en.md
+            # Chinese -> about/map_zh.md
+            # Japanese -> about/map_ja.md
+            uiOutput("map_about"),
+            
+            # Separator between the page explanation and the interactive controls.
+            tags$hr(),
+            
             # Reset Button: Instantly zooms the map back to a full global view
             actionButton(
               "btn_view_world", 
@@ -1085,14 +2319,26 @@ ui <- fluidPage(
                 )
               ),
               # Select a specific country to zoom in on (choices populated by server)
-              selectInput(
+              selectizeInput(
                 "selected_country", 
                 "2. Focus on Country:", 
-                choices = NULL
+                choices = NULL,
+                
+                selected = "none",
+                
+                # Default selection is View World.
+                
+                #options = list(
+                
+                #maxOptions = 3
+                
+                #dropdownParent = "body"
+                
+                #)
               )
             ),
             
-            tags$hr(), # Horizontal line separator
+            tags$hr(style = "margin-top: 170px; margin-bottom: 24px;"), # Horizontal line separator
             # Quick Jump & Batch View Section
             div(
               class = "control-group",
@@ -1134,10 +2380,16 @@ ui <- fluidPage(
         # Right Column (Width 9/12): The Interactive Map
         column(
           width = 9, 
-          leafletOutput("main_map", height = "730px") # leafletOutput renders the dynamic map using OpenStreetMap data
+          
+          # Modern card for the interactive PM2.5 world map
+          div(
+            class = "modern-card",
+            h3("Global PM2.5 Concentration Distribution"),
+            
+            leafletOutput("main_map", height = "730px") # leafletOutput renders the dynamic map using OpenStreetMap data
+          )
         )
       )
-      #),
     ),
     
     # =========================
@@ -1147,40 +2399,40 @@ ui <- fluidPage(
     # PM2.5, GDP in 2024, latitude, longitude, PM2.5 record count,
     # and pollutant type count.
     tabPanel(
-      "GDP + Geography Radar",
+      "Radar",
+      
+      # Add a controlled vertical gap below the sticky Dynamic Island header.
+      # This prevents the radar chart and selected-country map from starting too close
+      # to the floating navigation bar.
+      div(style = "height: 18px;"),
       
       fluidRow(
         
-        # Left Column: Control and explanation panel
+        # Left Column: explanation + control panel
         column(
           width = 3,
+          
           wellPanel(
-            h4("Radar Control"),
+            class = "info-float radar-float",
+            # Dynamic Markdown output for the Radar page.
+            # The actual Markdown file is selected in the server by output$radar_about.
+            # It changes according to the selected language:
+            # English -> about/radar_en.md
+            # Chinese -> about/radar_zh.md
+            # Japanese -> about/radar_ja.md
+            uiOutput("radar_about"),
             
-            # Country selector for the six selected PM2.5 countries
+            # Horizontal separator between the explanation and the input control.
+            tags$hr(),
+            
+            # Country selector for the six selected PM2.5 countries.
+            # When the user selects a country, the radar chart and country map update.
             selectInput(
-              "geo_radar_country",
-              "Select country:",
+              inputId = "geo_radar_country",
+              label = "Select country:",
               choices = selected_countries,
               selected = selected_countries[1]
-            ),
-            
-            tags$hr(),
-            
-            h4("Indicators"),
-            p("This radar chart compares each selected country using six indicators:"),
-            tags$ul(
-              tags$li("Average PM2.5"),
-              tags$li("GDP in 2024"),
-              tags$li("Average latitude"),
-              tags$li("Average longitude"),
-              tags$li("Number of PM2.5 records"),
-              tags$li("Number of pollutant types")
-            ),
-            
-            tags$hr(),
-            
-            p("All indicators are rescaled from 0 to 1 so that they can be displayed together in one radar chart.")
+            )
           )
         ),
         
@@ -1188,45 +2440,796 @@ ui <- fluidPage(
         column(
           width = 9,
           
-          # Use a nested fluidRow to place the radar chart and map side by side
-          fluidRow(
+          # Modern card wrapper for the main Radar page content.
+          div(
+            class = "modern-card",
             
-            # Left side: animated radar chart
-            column(
-              width = 7,
-              h3("GDP + Geography Radar Profile"),
+            # Nested row: radar chart on the left, map on the right.
+            fluidRow(
               
-              # This output is generated in server by output$geo_gdp_radar_plot
-              plotlyOutput("geo_gdp_radar_plot", height = "560px")
+              # Left side: animated radar chart.
+              column(
+                width = 7,
+                h3("GDP + Geography Radar Profile"),
+                
+                # This output is generated in server by output$geo_gdp_radar_plot.
+                plotlyOutput("geo_gdp_radar_plot", height = "560px")
+              ),
+              
+              # Right side: selected country map.
+              column(
+                width = 5,
+                h3("Selected Country Map"),
+                
+                # This output is generated in server by output$geo_country_map.
+                leafletOutput("geo_country_map", height = "560px")
+              )
             ),
             
-            # Right side: selected country map
-            column(
-              width = 5,
-              h3("Selected Country Map"),
-              
-              # This output is generated in server by output$geo_country_map
-              leafletOutput("geo_country_map", height = "560px")
-            )
-          ),
-          
-          br(),
-          
-          # Raw data table below both charts
-          h4("Raw Indicator Values"),
-          
-          # This output is generated in server by output$geo_gdp_profile_table
-          tableOutput("geo_gdp_profile_table")
+            # Add vertical spacing before the table.
+            br(),
+            
+            # Raw data table title.
+            h4("Raw Indicator Values"),
+            
+            # This output is generated in server by output$geo_gdp_profile_table.
+            tableOutput("geo_gdp_profile_table")
+          )
         )
       )
-    )
-  )
-)
+    ),
+    
+    # =========================
+    # Page 7: Final Call to Action
+    # =========================
+    # This final page uses three pollution-related images.
+    # The images are shown as animated polaroid-style cards.
+    # Each image includes a clickable source link for proper attribution.
+    
+    tabPanel(
+      "Final",
+      
+      # Add vertical spacing below the sticky header.
+      div(style = "height: 18px;"),
+      
+      fluidRow(
+        
+        # =========================
+        # Left Column: Floating explanation card
+        # =========================
+        column(
+          width = 3,
+          
+          wellPanel(
+            class = "info-float",
+            
+            # Dynamic Markdown output for the Final page.
+            # The actual Markdown file is selected in the server by output$final_about.
+            # It changes according to the selected language:
+            # English -> about/final_en.md
+            # Chinese -> about/final_zh.md
+            # Japanese -> about/final_ja.md
+            uiOutput("final_about")
+          )
+        ),
+        
+        # =========================
+        # Right Column: Final visual board
+        # =========================
+        # Right Column: final visual call-to-action page
+        # Right Column: final visual call-to-action page
+        column(
+          width = 9,
+          
+          # =========================
+          # Three final story cards in one horizontal row
+          # =========================
+          div(
+            class = "final-horizontal-board",
+            
+            # =========================
+            # Card 1: Industrial emissions
+            # =========================
+            div(
+              class = "final-horizontal-card",
+              
+              # Text block
+              div(
+                class = "final-horizontal-text",
+                
+                h3("Industrial Emissions"),
+                
+                p(
+                  "Factory smoke is one visible source of air pollution. Industrial emissions can release fine particulate matter into the atmosphere and worsen PM2.5 pollution."
+                ),
+                
+                tags$a(
+                  "Image credit: iStock / Maksim Shmakov",
+                  href = "https://www.istockphoto.com/hk/%E7%85%A7%E7%89%87/%E7%94%9F%E6%85%8B%E7%81%BD%E9%9B%A3-gm1141520118-305861595",
+                  target = "_blank",
+                  class = "image-credit"
+                )
+              ),
+              
+              # Polaroid image block
+              div(
+                class = "final-horizontal-polaroid rotate-left",
+                
+                tags$img(
+                  src = "istockphoto-1141520118-1024x1024.jpg",
+                  class = "final-horizontal-img"
+                )
+              )
+            ),
+            
+            # =========================
+            # Card 2: Human exposure
+            # =========================
+            div(
+              class = "final-horizontal-card",
+              
+              # Text block
+              div(
+                class = "final-horizontal-text",
+                
+                h3("Human Exposure"),
+                
+                p(
+                  "Air pollution is not only an environmental issue. When air quality becomes poor, people may need masks or other protection, especially during haze or smog events."
+                ),
+                
+                tags$a(
+                  "Image credit: iStock / Boyloso",
+                  href = "https://www.istockphoto.com/hk/%E7%85%A7%E7%89%87/asian-woman-wearing-an-n95-mask-for-protect-bad-air-pollution-gm2150501657-571664864",
+                  target = "_blank",
+                  class = "image-credit"
+                )
+              ),
+              
+              # Polaroid image block
+              div(
+                class = "final-horizontal-polaroid rotate-middle",
+                
+                tags$img(
+                  src = "istockphoto-2150501657-1024x1024.jpg",
+                  class = "final-horizontal-img"
+                )
+              )
+            ),
+            
+            # =========================
+            # Card 3: Traffic and haze
+            # =========================
+            div(
+              class = "final-horizontal-card",
+              
+              # Text block
+              div(
+                class = "final-horizontal-text",
+                
+                h3("Traffic and Haze"),
+                
+                p(
+                  "Urban traffic can worsen air quality when vehicle emissions accumulate. Under hazy weather conditions, pollutants may remain in the air and increase exposure risks."
+                ),
+                
+                tags$a(
+                  "Image credit: iStock / plherrera",
+                  href = "https://www.istockphoto.com/hk/%E7%85%A7%E7%89%87/cars-at-rush-hour-driving-through-thick-smog-gm174655376-8276806",
+                  target = "_blank",
+                  class = "image-credit"
+                )
+              ),
+              
+              # Polaroid image block
+              div(
+                class = "final-horizontal-polaroid rotate-right",
+                
+                tags$img(
+                  src = "istockphoto-174655376-1024x1024.jpg",
+                  class = "final-horizontal-img"
+                )
+              )
+            )
+          )
+    ))
+    
+  )))
 
 # =========================
 # 15. Server
 # =========================
 server <- function(input, output, session) {
+  # =========================
+  # Dynamic Island Button Navigation
+  # =========================
+  # =========================
+  # Dynamic Island Button Navigation + Page Explanation Modals
+  # =========================
+  # This section controls:
+  # 1. Which hidden tab/page is displayed after clicking a top navigation button.
+  # 2. Which navigation button should be highlighted as the active page.
+  # 3. Which explanation popup should appear after clicking each page button.
+  
+  
+  # ------------------------------------------------------------
+  # Helper function: update active button style
+  # ------------------------------------------------------------
+  # This function removes the "active" class from all navigation buttons,
+  # then adds the "active" class only to the button that was clicked.
+  # It makes the current page button visually highlighted.
+  set_active_button <- function(active_id) {
+    shinyjs::runjs(
+      paste0(
+        "$('.island-btn').removeClass('active');",
+        "$('#", active_id, "').addClass('active');"
+      )
+    )
+  }
+  
+  
+  # ------------------------------------------------------------
+  # Helper function: reusable modal style
+  # ------------------------------------------------------------
+  # This function creates a consistent popup explanation box.
+  # It avoids repeating the same modalDialog structure many times.
+  show_page_modal <- function(title, content) {
+    showModal(
+      modalDialog(
+        title = title,          # Popup title
+        easyClose = TRUE,       # Allow closing by clicking outside the modal
+        size = "m",             # Medium-sized modal
+        
+        # Main modal content
+        div(
+          style = "
+          font-size: 15px;
+          line-height: 1.7;
+          color: #2d3748;
+        ",
+          content
+        ),
+        
+        # Footer button
+        footer = modalButton("Close")
+      )
+    )
+  }
+  
+  
+  # ------------------------------------------------------------
+  # Cleaning page button
+  # ------------------------------------------------------------
+  # ============================================================
+  # Dynamic Island Button Navigation + Popup Explanations
+  # ============================================================
+  # Each navigation button does three things:
+  # 1. Switch the hidden tabsetPanel to the selected page.
+  # 2. Update the Dynamic Island button style:
+  #    - clicked/current button becomes blue
+  #    - all other buttons return to white
+  # 3. Show a popup explanation for the selected page.
+  # ============================================================
+  
+  
+  # ------------------------------------------------------------
+  # Cleaning page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_cleaning, {
+    
+    # Switch the hidden tabsetPanel to the Cleaning page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Cleaning"
+    )
+    
+    # Make the Cleaning button blue and reset all other buttons to white.
+    set_active_button("go_cleaning")
+    
+    # Show a popup explanation based on the Cleaning sidebar content.
+    show_page_modal(
+      title = "Cleaning Page Explanation",
+      content = tagList(
+        
+        h4("Purpose"),
+        p("This page summarizes the data-cleaning process before visualization."),
+        p("It shows how many observations were kept after each cleaning step."),
+        p("It also lists countries removed during PM2.5 country-level cleaning."),
+        
+        tags$hr(),
+        
+        h4("Cleaning Logic"),
+        p("First, missing or invalid observations are removed."),
+        p("Then, countries with unreliable PM2.5 records are removed."),
+        p("Countries with fewer than 3 PM2.5 observations or all-zero PM2.5 values are excluded."),
+        
+        tags$hr(),
+        
+        h4("How to Read This Page"),
+        p("The bar chart shows how the number of observations changes across cleaning stages."),
+        p("The removed-country table explains which countries were excluded and why."),
+        p("This cleaning step makes the later PM2.5 ranking, profile, map, and radar analysis more reliable.")
+      )
+    )
+  })
+  
+  
+  # ------------------------------------------------------------
+  # Correlation page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_correlation, {
+    
+    # Switch the hidden tabsetPanel to the Correlation page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Correlation"
+    )
+    
+    # Make the Correlation button blue and reset all other buttons to white.
+    set_active_button("go_correlation")
+    
+    # Show a popup explanation based on the Correlation sidebar content.
+    show_page_modal(
+      title = "Correlation Page Explanation",
+      content = tagList(
+        
+        h4("App Functions"),
+        p("1. Clean invalid air-quality observations."),
+        p("2. Remove countries with unreliable PM2.5 data."),
+        p("3. Calculate country-level average pollutant values."),
+        p("4. Display pollutant-by-pollutant correlations."),
+        p("5. Click a non-diagonal cell to generate a regression plot."),
+        
+        tags$hr(),
+        
+        h4("Cleaning Rules"),
+        p("1. Remove missing country, pollutant, and value."),
+        p("2. Remove negative pollutant values."),
+        p("3. Remove countries with fewer than 3 PM2.5 observations."),
+        p("4. Remove countries whose PM2.5 values are all zero."),
+        
+        tags$hr(),
+        
+        h4("How to Read This Page"),
+        p("Each heatmap cell shows the correlation between two pollutants."),
+        p("Redder cells indicate stronger positive relationships, while bluer cells indicate stronger negative relationships."),
+        p("Diagonal cells are disabled because self-correlation is always 1."),
+        p("Only non-diagonal cells can be clicked to generate a regression plot.")
+      )
+    )
+  })
+  
+  
+  # ------------------------------------------------------------
+  # Ranking page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_ranking, {
+    
+    # Switch the hidden tabsetPanel to the Ranking page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Ranking"
+    )
+    
+    # Make the Ranking button blue and reset all other buttons to white.
+    set_active_button("go_ranking")
+    
+    # Show a popup explanation based on the Ranking sidebar content.
+    show_page_modal(
+      title = "PM2.5 Ranking Page Explanation",
+      content = tagList(
+        
+        h4("PM2.5 Ranking"),
+        p("This page shows the final country ranking by average PM2.5 after data cleaning."),
+        p("Countries are sorted from highest to lowest average PM2.5."),
+        
+        tags$hr(),
+        
+        h4("Top 3 Polluted Countries"),
+        p(paste(top3_pm25_after$country, collapse = ", ")),
+        
+        tags$hr(),
+        
+        h4("Bottom 3 Cleanest Countries"),
+        p(paste(bottom3_pm25_after$country, collapse = ", ")),
+        
+        tags$hr(),
+        
+        h4("How to Read This Page"),
+        p("The x-axis represents country ranking after cleaning."),
+        p("The y-axis represents average PM2.5 concentration."),
+        p("Higher bars indicate countries with higher average PM2.5 levels."),
+        p("The top 3 and bottom 3 countries are highlighted because they are used in later profile, map, and radar pages."),
+        
+        tags$hr(),
+        
+        h4("PM2.5 Unit"),
+        p(pm25_unit)
+      )
+    )
+  })
+  
+  
+  # ------------------------------------------------------------
+  # Profile page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_profile, {
+    
+    # Switch the hidden tabsetPanel to the Profile page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Profile"
+    )
+    
+    # Make the Profile button blue and reset all other buttons to white.
+    set_active_button("go_profile")
+    
+    # Show a popup explanation based on the Profile sidebar content.
+    show_page_modal(
+      title = "Country PM2.5 Profile Page Explanation",
+      content = tagList(
+        
+        h4("Country Profile"),
+        p("This page shows within-country correlations between PM2.5 and other pollutants."),
+        p("The x-axis shows the top 3 and bottom 3 PM2.5 countries after cleaning."),
+        p("The color represents the correlation between PM2.5 and each pollutant inside the selected country."),
+        p("Blank cells mean that there are not enough paired observations for a reliable correlation."),
+        
+        tags$hr(),
+        
+        h4("Countries Included"),
+        p(paste(selected_countries, collapse = ", ")),
+        
+        tags$hr(),
+        
+        h4("PM2.5 Unit"),
+        p(pm25_unit),
+        
+        tags$hr(),
+        
+        h4("How to Use This Page"),
+        p("Hover over each tile to see country, pollutant, correlation, paired observations, and unit."),
+        p("Click a tile to analyze the relationship between PM2.5 and the selected pollutant within that country."),
+        
+        tags$hr(),
+        
+        h4("Why Ghana May Not Appear in the Heatmap"),
+        p("Ghana is included in the selected countries because it is one of the top PM2.5 countries after cleaning."),
+        p("However, this Profile heatmap only displays country-pollutant pairs that have enough valid paired observations."),
+        p("A tile is shown only when PM2.5 and another pollutant have at least 3 paired observations within the same country."),
+        p("If Ghana does not appear, it usually means Ghana does not have enough paired PM2.5-other pollutant observations, or one of the variables has no variation, so a reliable correlation cannot be calculated."),
+        p("This is why Ghana can appear in the PM2.5 ranking page but may be missing from the Profile heatmap.")
+      )
+    )
+  })
+  
+  
+  # ------------------------------------------------------------
+  # Map page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_map, {
+    
+    # Switch the hidden tabsetPanel to the Map page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Map"
+    )
+    
+    # Make the Map button blue and reset all other buttons to white.
+    set_active_button("go_map")
+    
+    # Show a popup explanation for the Map page.
+    show_page_modal(
+      title = "Global PM2.5 Map Page Explanation",
+      content = tagList(
+        
+        h4("Global PM2.5 Map"),
+        p("This page visualizes average PM2.5 concentration across countries on a world map."),
+        p("Countries are colored by their average PM2.5 level after data cleaning."),
+        p("Darker or warmer colors indicate higher PM2.5 concentration, while lighter or greener colors indicate lower PM2.5 concentration."),
+        
+        tags$hr(),
+        
+        h4("Interactive Controls"),
+        p("You can sort countries alphabetically, from high to low PM2.5, or from low to high PM2.5."),
+        p("You can select a country from the dropdown list to automatically zoom to that country."),
+        p("You can also use the quick buttons to view the top 3 polluted countries, bottom 3 cleanest countries, or all 6 extreme countries together."),
+        
+        tags$hr(),
+        
+        h4("Map Interpretation"),
+        p("This map helps compare the geographic distribution of PM2.5 pollution across countries."),
+        p("It is useful for identifying regional pollution patterns and locating countries with extreme PM2.5 values.")
+      )
+    )
+  })
+  
+  
+  # ------------------------------------------------------------
+  # Radar page button
+  # ------------------------------------------------------------
+  observeEvent(input$go_radar, {
+    
+    # Switch the hidden tabsetPanel to the Radar page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Radar"
+    )
+    
+    # Make the Radar button blue and reset all other buttons to white.
+    set_active_button("go_radar")
+    
+    # Show a popup explanation for the Radar page.
+    show_page_modal(
+      title = "GDP + Geography Radar Page Explanation",
+      content = tagList(
+        
+        h4("GDP + Geography Radar"),
+        p("This page compares the selected six countries using multiple indicators in one radar chart."),
+        p("The selected six countries come from the top 3 highest PM2.5 countries and the bottom 3 lowest PM2.5 countries after cleaning."),
+        
+        tags$hr(),
+        
+        h4("Indicators Used"),
+        p("The radar chart includes average PM2.5, GDP in 2024, average latitude, average longitude, number of PM2.5 records, and number of pollutant types."),
+        p("Because these indicators have different units and scales, all values are rescaled from 0 to 1 before plotting."),
+        
+        tags$hr(),
+        
+        h4("How to Use This Page"),
+        p("Use the country selector to choose one of the six selected countries."),
+        p("The radar chart shows the selected country's normalized profile."),
+        p("The map on the right shows the geographic location of the selected country."),
+        p("The raw indicator table below shows the original unscaled values for interpretation.")
+      )
+    )
+  })
+  
+  # =========================
+  # Language Button Highlight Logic
+  # =========================
+  # These observers only control the visual highlight of language buttons.
+  # They do not translate the page content yet.
+  # If translation is needed later, the page text should be stored reactively.
+  set_active_language <- function(active_lang_id) {
+    
+    # Remove active style from all language buttons.
+    shinyjs::runjs("
+    $('.lang-btn').removeClass('lang-btn-active');
+  ")
+    
+    # Add active style to the selected language button.
+    shinyjs::runjs(
+      paste0(
+        "$('#", active_lang_id, "').addClass('lang-btn-active');"
+      )
+    )
+  }
+  
+  # English button
+  observeEvent(input$lang_en, {
+    set_active_language("lang_en")
+  })
+  
+  # Chinese button
+  observeEvent(input$lang_zh, {
+    set_active_language("lang_zh")
+  })
+  
+  # Japanese button
+  observeEvent(input$lang_ja, {
+    set_active_language("lang_ja")
+  })
+  
+  # =========================
+  # Language Switching Logic
+  # =========================
+  # This reactive value stores the current language selected by the user.
+  # "en" = English, "zh" = Chinese, "ja" = Japanese
+  current_lang <- reactiveVal("en")
+  
+  # Opening page language buttons
+  observeEvent(input$opening_lang_selected, {
+    current_lang(input$opening_lang_selected)
+    
+    if (input$opening_lang_selected == "en") {
+      updateActionButton(session, "start_app", label = "Start")
+    }
+    
+    if (input$opening_lang_selected == "zh") {
+      updateActionButton(session, "start_app", label = "开始")
+    }
+    
+    if (input$opening_lang_selected == "ja") {
+      updateActionButton(session, "start_app", label = "スタート")
+    }
+  })
+  
+  # =========================
+  # Opening Page Typewriter Animation
+  # =========================
+  # This version waits until the UI is fully rendered before starting.
+  # It fixes the issue where only the blinking cursor "|" appears.
+  
+  
+  
+  # Helper function: update active language button style
+  # This function makes only the selected language button visually active.
+  set_active_language <- function(active_lang_id) {
+    shinyjs::runjs("
+    $('.lang-btn').removeClass('lang-btn-active');
+  ")
+    
+    shinyjs::runjs(
+      paste0(
+        "$('#", active_lang_id, "').addClass('lang-btn-active');"
+      )
+    )
+  }
+  
+  
+  # English button
+  observeEvent(input$lang_en, {
+    current_lang("en")
+    set_active_language("lang_en")
+    
+    # Update Dynamic Island navigation labels to English
+    updateActionButton(session, "go_cleaning", label = "Cleaning")
+    updateActionButton(session, "go_correlation", label = "Correlation")
+    updateActionButton(session, "go_ranking", label = "Ranking")
+    updateActionButton(session, "go_profile", label = "Profile")
+    updateActionButton(session, "go_map", label = "Map")
+    updateActionButton(session, "go_radar", label = "Radar")
+    updateActionButton(session, "go_final", label = "Final")
+  })
+  
+  
+  # Chinese button
+  observeEvent(input$lang_zh, {
+    current_lang("zh")
+    set_active_language("lang_zh")
+    
+    # Update Dynamic Island navigation labels to Chinese
+    updateActionButton(session, "go_cleaning", label = "数据清洗")
+    updateActionButton(session, "go_correlation", label = "相关性")
+    updateActionButton(session, "go_ranking", label = "排名")
+    updateActionButton(session, "go_profile", label = "国家画像")
+    updateActionButton(session, "go_map", label = "地图")
+    updateActionButton(session, "go_radar", label = "雷达图")
+    updateActionButton(session, "go_final", label = "结尾")
+  })
+  
+  
+  # Japanese button
+  observeEvent(input$lang_ja, {
+    current_lang("ja")
+    set_active_language("lang_ja")
+    
+    # Update Dynamic Island navigation labels to Japanese
+    updateActionButton(session, "go_cleaning", label = "クリーニング")
+    updateActionButton(session, "go_correlation", label = "相関")
+    updateActionButton(session, "go_ranking", label = "ランキング")
+    updateActionButton(session, "go_profile", label = "プロファイル")
+    updateActionButton(session, "go_map", label = "地図")
+    updateActionButton(session, "go_radar", label = "レーダー")
+    updateActionButton(session, "go_final", label = "終わり")
+  })
+  
+  output$opening_markdown <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/opening_en.md"))
+    }
+    
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/opening_zh.md"))
+    }
+    
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/opening_ja.md"))
+    }
+  })
+  
+  # =========================
+  # Dynamic Markdown Outputs
+  # =========================
+  # These outputs select different Markdown files based on current_lang().
+  # This keeps includeMarkdown() in the project while allowing language switching.
+  
+  output$cleaning_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/cleaning_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/cleaning_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/cleaning_ja.md"))
+    }
+  })
+  
+  output$correlation_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/correlation_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/correlation_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/correlation_ja.md"))
+    }
+  })
+  
+  output$ranking_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/ranking_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/ranking_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/ranking_ja.md"))
+    }
+  })
+  
+  output$profile_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/profile_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/profile_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/profile_ja.md"))
+    }
+  })
+  
+  output$map_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/map_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/map_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/map_ja.md"))
+    }
+  })
+  
+  output$radar_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/radar_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/radar_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/radar_ja.md"))
+    }
+  })
+  
+  # Final page floating explanation card
+  # This output changes the Final page explanation according to current_lang().
+  output$final_about <- renderUI({
+    if (current_lang() == "en") {
+      return(includeMarkdown("about/final_en.md"))
+    }
+    if (current_lang() == "zh") {
+      return(includeMarkdown("about/final_zh.md"))
+    }
+    if (current_lang() == "ja") {
+      return(includeMarkdown("about/final_ja.md"))
+    }
+  })
+  
+  # =========================
+  # Reactive values
+  # =========================
   # Reactive values act as "placeholders" that store user choices (like clicks) 
   # so other parts of the app can react to them.
   selected <- reactiveVal(NULL) # Stores pollutant pairs from Page 2
@@ -1343,7 +3346,7 @@ server <- function(input, output, session) {
     }
     # Save selected pair
     selected(list(x = x_var, y = y_var))
-  })
+  }, ignoreInit = TRUE)
   
   # =========================
   # Page 4 click event
@@ -1381,7 +3384,7 @@ server <- function(input, output, session) {
         pollutant = clicked_pollutant
       )
     )
-  })
+  }, ignoreInit = TRUE)
   
   # =========================
   # Page 2 heatmap
@@ -2279,7 +4282,7 @@ server <- function(input, output, session) {
           )
         ),
         showlegend = FALSE,
-        margin = list(l = 30, r = 30, t = 50, b = 30)
+        margin = list(l = 160, r = 80, t = 70, b = 130)
       ) %>%
       animation_opts(
         frame = 60,
@@ -2287,8 +4290,8 @@ server <- function(input, output, session) {
         redraw = TRUE
       ) %>%
       animation_button(
-        x = 0,
-        y = 0,
+        x = -0.08,
+        y = -0.12,
         xanchor = "left",
         yanchor = "bottom"
       ) %>%
@@ -2369,6 +4372,48 @@ server <- function(input, output, session) {
     m
   })
   
+  # ------------------------------------------------------------
+  # Final page button
+  # ------------------------------------------------------------
+  # This observer controls the Final navigation button.
+  # When the user clicks Final, the app switches to the ending page,
+  # highlights the Final button, and shows a short explanation modal.
+  
+  observeEvent(input$go_final, {
+    
+    # Switch the hidden tabsetPanel to the Final page.
+    updateTabsetPanel(
+      session = session,
+      inputId = "main_tabs",
+      selected = "Final"
+    )
+    
+    # Make the Final button blue and reset all other navigation buttons to white.
+    set_active_button("go_final")
+    
+    # Show a short explanation popup for the final page.
+    show_page_modal(
+      title = "Final Call to Action",
+      content = tagList(
+        
+        h4("Why This Ending Matters"),
+        
+        p(
+          "This final page uses polaroid-style images to remind users that air pollution is connected to industrial emissions, traffic haze, and human health."
+        ),
+        
+        tags$hr(),
+        
+        h4("Main Message"),
+        
+        p(
+          "Clean air should not be taken for granted. Understanding PM2.5 data helps us recognize why air pollution deserves public attention."
+        )
+      )
+    )
+  })
+  
+  print("App running successfully")
 }
 
 # run shinyApp
