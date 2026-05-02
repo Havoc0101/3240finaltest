@@ -1,0 +1,394 @@
+---
+title: "Untitled"
+author: "LZR"
+date: "2026-04-24"
+output: html_document
+runtime: shiny
+---
+```{r}
+library(shiny)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(lubridate)
+library(stringr)
+library(forcats)
+library(purrr)
+library(plotly)
+
+raw <- read_csv("C:/Users/user/Desktop/world_air_quality.csv", show_col_types = FALSE)
+
+target_countries <- c("Ghana", "Mongolia", "India", "Iceland", "Japan", "Finland")
+
+# Clean to daily means
+# Remove obvious invalid values (e.g., sentinel codes such as -999, -995)
+clean_daily <- raw %>%
+  mutate(
+    datetime = suppressWarnings(ymd_hm(`Last Updated`, tz = "UTC")),
+    date = as.Date(datetime),
+    country = str_trim(`Country Label`),
+    pollutant = str_trim(Pollutant),
+    value = suppressWarnings(as.numeric(Value))
+  ) %>%
+  filter(country %in% target_countries) %>%
+  filter(!is.na(date), !is.na(pollutant), !is.na(value)) %>%
+  filter(value >= 0) %>%
+  group_by(country, date, pollutant) %>%
+  summarise(daily_mean = mean(value, na.rm = TRUE), .groups = "drop")
+
+country_levels <- target_countries
+pollutant_levels <- clean_daily %>%
+  filter(pollutant != "PM2.5") %>%
+  distinct(pollutant) %>%
+  arrange(pollutant) %>%
+  pull(pollutant)
+
+# Build a complete country x pollutant grid so blank cells remain visible
+cor_grid <- map_dfr(country_levels, function(cty) {
+  wide <- clean_daily %>%
+    filter(country == cty) %>%
+    select(date, pollutant, daily_mean) %>%
+    pivot_wider(names_from = pollutant, values_from = daily_mean)
+
+  if (!"PM2.5" %in% names(wide)) {
+    return(tibble(country = cty, pollutant = pollutant_levels, cor = NA_real_, n = NA_integer_))
+  }
+
+  map_dfr(pollutant_levels, function(p) {
+    if (!p %in% names(wide)) {
+      return(tibble(country = cty, pollutant = p, cor = NA_real_, n = NA_integer_))
+    }
+
+    x <- wide[["PM2.5"]]
+    y <- wide[[p]]
+    ok <- complete.cases(x, y)
+    n <- sum(ok)
+    cor_val <- if (n >= 3) cor(x[ok], y[ok], method = "pearson") else NA_real_
+    tibble(country = cty, pollutant = p, cor = cor_val, n = n)
+  })
+}) %>%
+  mutate(
+    country = factor(country, levels = country_levels),
+    pollutant = factor(pollutant, levels = pollutant_levels)
+  )
+
+decode_axis_value <- function(value, levels_vec) {
+  if (length(value) == 0 || is.null(value) || all(is.na(value))) return(NA_character_)
+  v <- as.character(value)[1]
+  if (grepl("^[0-9]+$", v)) {
+    idx <- as.integer(v)
+    if (!is.na(idx) && idx >= 1 && idx <= length(levels_vec)) return(as.character(levels_vec[idx]))
+  }
+  v
+}
+
+make_pair_data <- function(dat, country_name, pollutant_name) {
+  wide <- dat %>%
+    filter(country == country_name) %>%
+    select(date, pollutant, daily_mean) %>%
+    pivot_wider(names_from = pollutant, values_from = daily_mean)
+
+  if (!all(c("PM2.5", pollutant_name) %in% names(wide))) {
+    return(tibble())
+  }
+
+  wide %>%
+    select(date, PM2.5, all_of(pollutant_name)) %>%
+    rename(other = all_of(pollutant_name)) %>%
+    filter(complete.cases(PM2.5, other))
+}
+
+ui <- fluidPage(
+  tags$head(tags$style(HTML("\n    .main-container { max-width: 1800px !important; }\n    .plotly, .shiny-plot-output { width: 100% !important; }\n  "))),
+  titlePanel("PM2.5 Correlation Heatmap Across Countries"),
+  fluidRow(
+    column(
+      width = 3,
+      wellPanel(
+        h4("Instructions"),
+        p("This app computes daily means by country, date, and pollutant."),
+        p("The heatmap shows Pearson correlations between PM2.5 and other pollutants."),
+        p("Click any tile to generate the regression plot below."),
+        checkboxInput("show_n", "Show paired-day counts", TRUE),
+        tags$hr(),
+        strong("Countries kept in the plot:"),
+        p(paste(country_levels, collapse = ", ")),
+        strong("Note:"),
+        p("Ghana is kept in the axis even if some cells are blank because the source data may not have enough valid daily pairs.")
+      )
+    ),
+    column(
+      width = 9,
+      plotlyOutput("cor_plot", height = "900px")
+    )
+  ),
+  fluidRow(
+    column(
+      width = 12,
+      verbatimTextOutput("selected_info"),
+      plotOutput("reg_plot", height = "650px")
+    )
+  ),
+  fluidRow(
+    column(
+      width = 12,
+      tableOutput("cor_table")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  selected_cell <- reactiveVal(NULL)
+
+  observeEvent(event_data("plotly_click", source = "hm"), {
+    click <- event_data("plotly_click", source = "hm")
+    req(click$x, click$y)
+
+    selected_cell(list(
+      country = decode_axis_value(click$x, country_levels),
+      pollutant = decode_axis_value(click$y, pollutant_levels)
+    ))
+  })
+
+  output$cor_plot <- renderPlotly({
+    p <- ggplot(
+      cor_grid,
+      aes(
+        x = country,
+        y = pollutant,
+        fill = cor,
+        text = paste0(
+          "Country: ", country,
+          "<br>Pollutant: ", pollutant,
+          "<br>Correlation: ", ifelse(is.na(cor), "NA", sprintf("%.2f", cor)),
+          "<br>Paired days: ", ifelse(is.na(n), "NA", n)
+        )
+      )
+    ) +
+      geom_tile(color = "white", linewidth = 0.45) +
+      geom_text(aes(label = ifelse(is.na(cor), "", sprintf("%.2f", cor))), size = 4) +
+      scale_fill_gradient2(
+        low = "#4575b4",
+        mid = "white",
+        high = "#d73027",
+        midpoint = 0,
+        limits = c(-1, 1),
+        na.value = "grey90"
+      ) +
+      labs(
+        title = "Correlation between PM2.5 and Other Pollutants by Country",
+        x = "Country",
+        y = "Pollutant",
+        fill = "Correlation"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        axis.text.x = element_text(angle = 35, hjust = 1),
+        panel.grid = element_blank(),
+        plot.title = element_text(face = "bold")
+      )
+
+    ggplotly(p, tooltip = "text", source = "hm") %>%
+      layout(margin = list(l = 120, r = 30, b = 120, t = 80))
+  })
+
+  output$cor_table <- renderTable({
+    dat <- cor_grid %>% arrange(country, pollutant)
+    if (isTRUE(input$show_n)) dat else dat %>% select(-n)
+  }, digits = 3)
+
+  output$selected_info <- renderText({
+    sel <- selected_cell()
+    if (is.null(sel)) {
+      return("Click one tile in the heatmap to generate the regression plot.")
+    }
+    paste0("Selected: ", sel$country, " / ", sel$pollutant)
+  })
+
+  output$reg_plot <- renderPlot({
+    sel <- selected_cell()
+    req(!is.null(sel), !is.na(sel$country), !is.na(sel$pollutant))
+
+    dat <- make_pair_data(clean_daily, sel$country, sel$pollutant)
+    req(nrow(dat) >= 2)
+
+    fit <- lm(other ~ PM2.5, data = dat)
+    r2 <- summary(fit)$r.squared
+    eq <- paste0("y = ", round(coef(fit)[1], 3), " + ", round(coef(fit)[2], 3), "x")
+
+    ggplot(dat, aes(x = PM2.5, y = other)) +
+      geom_point(alpha = 0.7) +
+      geom_smooth(method = "lm", se = TRUE) +
+      labs(
+        x = "Daily mean PM2.5",
+        y = paste0("Daily mean ", sel$pollutant),
+        title = paste0(sel$country, ": PM2.5 vs ", sel$pollutant, " Regression"),
+        subtitle = paste0(eq, "   |   R² = ", round(r2, 3), "   |   n = ", nrow(dat))
+      ) +
+      theme_minimal(base_size = 14)
+  })
+}
+
+shinyApp(ui, server)
+```
+
+
+```{r}
+library(shiny)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(stringr)
+library(plotly)
+
+raw <- read_csv("C:/Users/user/Desktop/world_air_quality.csv", show_col_types = FALSE)
+
+# ===== Data Processing =====
+country_avg <- raw %>%
+  mutate(
+    country = str_trim(`Country Label`),
+    pollutant = str_trim(Pollutant),
+    value = suppressWarnings(as.numeric(Value))
+  ) %>%
+  filter(!is.na(value), value >= 0) %>%
+  group_by(country, pollutant) %>%
+  summarise(avg = mean(value, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = pollutant, values_from = avg)
+
+# Keep only pollutants with enough data
+country_avg <- country_avg %>%
+  select(where(~ sum(!is.na(.)) >= 5))
+
+pollutants <- colnames(country_avg)[-1]
+
+# Correlation matrix
+cor_mat <- cor(country_avg[,-1], use = "pairwise.complete.obs")
+
+cor_long <- as.data.frame(as.table(cor_mat)) %>%
+  rename(x = Var1, y = Var2, cor = Freq)
+
+# Add unique key for click identification
+cor_long$key <- paste(cor_long$x, cor_long$y, sep = "::")
+
+# ===== UI =====
+ui <- fluidPage(
+  tags$head(tags$style(HTML("
+    .container-fluid {max-width: 1800px;}
+  "))),
+  
+  titlePanel("Cross-country Pollutant Correlation"),
+  
+  fluidRow(
+    column(
+      width = 12,
+      plotlyOutput("heatmap", height = "1200px")
+    )
+  ),
+  
+  fluidRow(
+    column(
+      width = 12,
+      verbatimTextOutput("info"),
+      plotOutput("reg_plot", height = "650px")
+    )
+  )
+)
+
+# ===== SERVER =====
+server <- function(input, output, session) {
+  
+  selected <- reactiveVal(NULL)
+  
+  observeEvent(event_data("plotly_click", source = "heatmap"), {
+    click <- event_data("plotly_click", source = "heatmap")
+    req(click$key)
+    parts <- strsplit(click$key, "::", fixed = TRUE)[[1]]
+    selected(list(
+      x = parts[1],
+      y = parts[2]
+    ))
+  })
+  
+  output$heatmap <- renderPlotly({
+    
+    p <- ggplot(cor_long, aes(x, y, fill = cor,
+                             text = paste0(
+                               "X: ", x,
+                               "<br>Y: ", y,
+                               "<br>Corr: ", round(cor, 2)
+                             ),
+                             key = key)) +
+      geom_tile(color = "white") +
+      
+      geom_text(aes(label = sprintf("%.2f", cor)),
+                size = 3.5) +
+      
+      scale_fill_gradient2(
+        low = "#4575b4",
+        mid = "white",
+        high = "#d73027",
+        midpoint = 0,
+        limits = c(-1,1)
+      ) +
+      
+      coord_fixed() +
+      
+      labs(x = "Pollutant", y = "Pollutant") +   # Added axis labels
+      
+      theme_minimal(base_size = 18) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        panel.grid = element_blank()
+      )
+    
+    ggplotly(p, tooltip = "text", source = "heatmap") %>%
+      layout(margin = list(l = 100, r = 40, b = 120, t = 30))
+  })
+  
+  output$info <- renderText({
+    sel <- selected()
+    if (is.null(sel)) return("Click a cell")
+    paste0("Selected: ", sel$x, " vs ", sel$y)
+  })
+  
+  output$reg_plot <- renderPlot({
+    sel <- selected()
+    req(sel)
+    
+    x_var <- sel$x
+    y_var <- sel$y
+    
+    dat <- country_avg %>%
+      select(country, all_of(x_var), all_of(y_var)) %>%
+      rename(x = all_of(x_var), y = all_of(y_var)) %>%
+      filter(complete.cases(x, y))
+    
+    req(nrow(dat) >= 3)
+    
+    fit <- lm(y ~ x, data = dat)
+    
+    ggplot(dat, aes(x, y)) +
+      geom_point(size = 3) +
+      geom_smooth(method = "lm", se = TRUE) +
+      geom_text(aes(label = country), vjust = -0.5, size = 4) +
+      labs(
+        title = paste0(x_var, " vs ", y_var),
+        subtitle = paste0("y = ",
+                          round(coef(fit)[1],2),
+                          " + ",
+                          round(coef(fit)[2],2),"x")
+      ) +
+      theme_minimal(base_size = 16)
+  })
+}
+
+shinyApp(ui, server)
+```
+
+
+
+
+
